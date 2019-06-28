@@ -322,12 +322,12 @@ def _bottleneck(inputs, filters, kernel, t, s, block_args, r=False, alpha=1.0, b
     x = BatchNorm(axis=channel_axis,name='conv_dw_{}_bn'.format(block_id))(x, training=train_bn)
     x = KL.Activation(relu6, name='conv_dw_{}_relu'.format(block_id))(x)
 
-
+    print('block args:', block_args)
     # Check if squeeze and excitation is required:
     has_se = (block_args.se_ratio is not None) and (block_args.se_ratio > 0) and (block_args.se_ratio <= 1) 
 
     if has_se: 
-        num_reduced_filters = max(1, int(in_filters * block_args[se_ratio]))
+        num_reduced_filters = max(1, int(in_filters * block_args.se_ratio))
         
         # Squeeze and Excitation layer.
 
@@ -351,10 +351,11 @@ def _bottleneck(inputs, filters, kernel, t, s, block_args, r=False, alpha=1.0, b
     x = BatchNorm(axis=channel_axis, name='conv_pw_{}_bn'.format(block_id))(x, training=train_bn)
 
     if r:
-        if (strides[0] == 1) and in_filters == filters:
+        if (s == 1) and in_filters == filters:
         # only apply drop_connect if skip presents.
             if block_args.dropconnect:
-                x = utils.drop_connect(x, training, drop_connect_rate)
+                ## TODO: Remove dropout during inference
+                x = KL.Lambda(utils.drop_connect, arguments={'is_training': True, 'drop_connect_rate': True})(x)
 
             # Need to be sure where to add this
             x = KL.add([x, inputs], name='res{}'.format(block_id))
@@ -384,7 +385,7 @@ def _inverted_residual_block(inputs, filters, kernel, t, strides, block_args, n,
 
     for i in range(1, n):
         block_id += 1
-        x = _bottleneck(x, filters, kernel, t, 1, True, block_args, alpha, block_id, train_bn)
+        x = _bottleneck(x, filters, kernel, t, 1, block_args, True, alpha, block_id, train_bn)
 
     return x
 
@@ -419,7 +420,7 @@ def efficientnet_graph(inputs, architecture, alpha = 1.0, train_bn = False):
     x      = _inverted_residual_block(x, 80,  (3, 3), t=6, strides=2, block_args=block_arg_list[3], n=3, alpha=1.0, block_id=6, train_bn=train_bn)	# Input Res: 1/8
     C4 = x = _inverted_residual_block(x, 112,  (3, 3), t=6, strides=1, block_args=block_arg_list[4], n=3, alpha=1.0, block_id=9, train_bn=train_bn)	# Input Res: 1/8
     x      = _inverted_residual_block(x, 192, (3, 3), t=6, strides=2, block_args=block_arg_list[5], n=4, alpha=1.0, block_id=12, train_bn=train_bn)	# Input Res: 1/16
-    C5 = x = _inverted_residual_block(x, 320, (3, 3), t=6, strides=1, block_args=block_args_list[6], n=1, alpha=1.0, block_id=16, train_bn=train_bn)	# Input Res: 1/32
+    C5 = x = _inverted_residual_block(x, 320, (3, 3), t=6, strides=1, block_args=block_arg_list[6], n=1, alpha=1.0, block_id=16, train_bn=train_bn)	# Input Res: 1/32
 
     return [C1, C2, C3, C4, C5]
 
