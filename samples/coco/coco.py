@@ -48,7 +48,7 @@ import urllib.request
 import shutil
 
 # Root directory of the project
-ROOT_DIR = os.path.abspath("../../")
+ROOT_DIR = os.path.abspath("./")
 
 # Import Mask RCNN
 sys.path.append(ROOT_DIR)  # To find local version of the library
@@ -107,8 +107,8 @@ class CocoConfig(Config):
     }
 
     ## Steps
-    STEPS_PER_EPOCH = 10000
-    VALIDATION_STEPS = 50
+    STEPS_PER_EPOCH = 5
+    VALIDATION_STEPS = 2
 
     ## Additions
     TRAIN_BN = True
@@ -442,7 +442,8 @@ if __name__ == '__main__':
                         default=DEFAULT_DATASET_YEAR,
                         metavar="<year>",
                         help='Year of the MS-COCO dataset (2014 or 2017) (default=2014)')
-    parser.add_argument('--model', required=True,
+    parser.add_argument('--model', required=False,
+                        default="dummy",
                         metavar="/path/to/weights.h5",
                         help="Path to weights .h5 file or 'coco'")
     parser.add_argument('--logs', required=False,
@@ -460,9 +461,9 @@ if __name__ == '__main__':
                         type=bool)
 
     parser.add_argument('--classes', required=False,
-			            default=None,
-			            metavar="<class names>",
-			            help='classes that should be trained on. Default are all')
+                        default=None,
+                        metavar="<class names>",
+                        help='classes that should be trained on. Default are all')
     
     args = parser.parse_args()
     print("Command: ", args.command)
@@ -472,9 +473,9 @@ if __name__ == '__main__':
     print("Logs: ", args.logs)
     print("Auto Download: ", args.download)
     print("Classes (None means all):", args.classes)
-			
-	# classes must be a list
-	args.classes = list(args.classes)
+    
+    # classes must be a list
+    #args.classes = list(args.classes)
 
     # Configurations
     if args.command == "train":
@@ -511,7 +512,7 @@ if __name__ == '__main__':
 
     # Load weights
     print("Loading weights ", model_path)
-    if model_path:
+    if model_path != "dummy":
         model.load_weights(model_path, by_name=True)
     else:
         print("No model found: not loading weights")
@@ -542,7 +543,7 @@ if __name__ == '__main__':
         print("Training network heads")
         model.train(dataset_train, dataset_val,
                     learning_rate=config.LEARNING_RATE,
-                    epochs=40,
+                    epochs=2,
                     layers='heads',
                     augmentation=augmentation)
 
@@ -551,7 +552,7 @@ if __name__ == '__main__':
         print("Fine tune Resnet stage 4 and up")
         model.train(dataset_train, dataset_val,
                     learning_rate=config.LEARNING_RATE,
-                    epochs=120,
+                    epochs=2,
                     layers='4+',
                     augmentation=augmentation)
 
@@ -560,7 +561,7 @@ if __name__ == '__main__':
         print("Fine tune all layers")
         model.train(dataset_train, dataset_val,
                     learning_rate=config.LEARNING_RATE / 10,
-                    epochs=160,
+                    epochs=2,
                     layers='all',
                     augmentation=augmentation)
 

@@ -8,6 +8,7 @@ Written by Waleed Abdulla
 """
 
 import os
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 import random
 import datetime
 import re
@@ -2087,12 +2088,17 @@ class MaskRCNN():
         # Bottom-up Layers
         # Returns a list of the last layers of each stage, 5 in total.
         # Don't create the thead (stage 5), so we pick the 4th item in the list.
-        if callable(config.BACKBONE):
-            _, C2, C3, C4, C5 = config.BACKBONE(input_image, stage5=True,
-                                                train_bn=config.TRAIN_BN)
-        else:
-            _, C2, C3, C4, C5 = resnet_graph(input_image, config.BACKBONE,
-                                             stage5=True, train_bn=config.TRAIN_BN)
+        print("current config backbone is:", config.BACKBONE)
+        if config.BACKBONE in ["resnet50", "resnet101"]:
+            _, C2, C3, C4, C5 = resnet_graph(input_image, config.BACKBONE, stage5=True, train_bn=config.TRAIN_BN)
+        elif config.BACKBONE in ["efficientnet"]:
+            _, C2, C3, C4, C5 = efficientnet_graph(input_image, config.BACKBONE, alpha=1.0, train_bn=config.TRAIN_BN)
+#         if callable(config.BACKBONE):
+#             _, C2, C3, C4, C5 = config.BACKBONE(input_image, stage5=True,
+#                                                 train_bn=config.TRAIN_BN)
+#         else:
+#             _, C2, C3, C4, C5 = resnet_graph(input_image, config.BACKBONE,
+#                                              stage5=True, train_bn=config.TRAIN_BN)
         # Top-down Layers
         # TODO: add assert to varify feature map sizes match what's in config
         P5 = KL.Conv2D(config.TOP_DOWN_PYRAMID_SIZE, (1, 1), name='fpn_c5p5')(C5)
@@ -2374,6 +2380,8 @@ class MaskRCNN():
             keras.regularizers.l2(self.config.WEIGHT_DECAY)(w) / tf.cast(tf.size(w), tf.float32)
             for w in self.keras_model.trainable_weights
             if 'gamma' not in w.name and 'beta' not in w.name]
+        print('reg_losses are:', reg_losses)
+        print('trainable weights are: ', self.keras_model.trainable_weights)
         self.keras_model.add_loss(tf.add_n(reg_losses))
 
         # Compile
@@ -2400,6 +2408,7 @@ class MaskRCNN():
         if verbose > 0 and keras_model is None:
             log("Selecting layers to train")
 
+        print("Layer regex: ", layer_regex)
         keras_model = keras_model or self.keras_model
 
         # In multi-GPU training, we wrap the model. Get layers
@@ -2520,9 +2529,11 @@ class MaskRCNN():
         elif self.config.BACKBONE in ["efficientnet"]:
             # From a specific Efficientnet stage and up
             stage_regex = { "3+": r"(conv.*5.*)|(conv.*6.*)|(conv.*7.*)|(conv.*8.*)|(conv.*9.*)|(conv.*10.*)|(conv.*11.*)|(conv.*12.*)|(conv.*13.*)|(conv.*14.*)|(conv.*15.*)|(conv.*16.*)|(mrcnn\_.*)|(rpn\_.*)|(fpn\_.*)",
-                            "4+": r"(conv.*11.*)|(conv.*12.*)|(conv.*13.*)|(conv.*14.*)|(conv.*15.*)|(conv.*16.*)|(mrcnn\_.*)|(rpn\_.*)|(fpn\_.*)",
-                            "5+": r"(conv.*16.*)|(mrcnn\_.*)|(rpn\_.*)|(fpn\_.*)" }
+            "4+": r"(conv.*11.*)|(conv.*12.*)|(conv.*13.*)|(conv.*14.*)|(conv.*15.*)|(conv.*16.*)|(mrcnn\_.*)|(rpn\_.*)|(fpn\_.*)",
+            "5+": r"(conv.*16.*)|(mrcnn\_.*)|(rpn\_.*)|(fpn\_.*)" }
 
+        layer_regex.update(stage_regex)
+        
         if layers in layer_regex.keys():
             layers = layer_regex[layers]
 
