@@ -347,32 +347,6 @@ def _inverted_residual_block(inputs, filters, kernel, t, strides, n, alpha, bloc
 
     return x
 
-
-def mobilenetv2_graph(inputs, architecture, alpha = 1.0, train_bn = False):
-    """MobileNetv2
-    This function defines a MobileNetv2 architectures.
-    # Arguments
-        inputs: Inuput Tensor, e.g. an image
-        architecture: to preserve consistency
-        alpha: Width Multiplier
-        train_bn: Boolean. Train or freeze Batch Norm layres
-    # Returns
-        five MobileNetv2 model stages.
-    """
-    assert architecture in ["mobilenetv2"]
-
-    x      = _conv_block(inputs, 32, alpha, (3, 3), strides=(2, 2), block_id=0, train_bn=train_bn)                      # Input Res: 1
-    C1 = x = _inverted_residual_block(x, 16,  (3, 3), t=1, strides=1, n=1, alpha=1.0, block_id=1, train_bn=train_bn)	# Input Res: 1/2
-    C2 = x = _inverted_residual_block(x, 24,  (3, 3), t=6, strides=2, n=2, alpha=1.0, block_id=2, train_bn=train_bn)	# Input Res: 1/2
-    C3 = x = _inverted_residual_block(x, 32,  (3, 3), t=6, strides=2, n=3, alpha=1.0, block_id=4, train_bn=train_bn)	# Input Res: 1/4
-    x      = _inverted_residual_block(x, 64,  (3, 3), t=6, strides=2, n=4, alpha=1.0, block_id=7, train_bn=train_bn)	# Input Res: 1/8
-    C4 = x = _inverted_residual_block(x, 96,  (3, 3), t=6, strides=1, n=3, alpha=1.0, block_id=11, train_bn=train_bn)	# Input Res: 1/8
-    x      = _inverted_residual_block(x, 160, (3, 3), t=6, strides=2, n=3, alpha=1.0, block_id=14, train_bn=train_bn)	# Input Res: 1/16
-    C5 = x = _inverted_residual_block(x, 320, (3, 3), t=6, strides=1, n=1, alpha=1.0, block_id=17, train_bn=train_bn)	# Input Res: 1/32
-    #x = _conv_block(x, 1280, alpha, (1, 1), strides=(1, 1), block_id=18, train_bn=train_bn)                            # Input Res: 1/32
-
-    return [C1,C2,C3,C4,C5]
-
 def efficientnet_graph(inputs, architecture, alpha = 1.0, train_bn = False):
     """Efficientnet
     This function defines a Efficientnet baseline architecture.
