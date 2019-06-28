@@ -86,6 +86,12 @@ def compute_backbone_shapes(config, image_shape):
             for stride in config.BACKBONE_STRIDES])
 
 
+class BlockArgs(object):
+    def __init__(self, se_ratio=0, dropconnect=None, strides=[1, 1]):
+        self.se_ratio = se_ratio
+        self.strides = strides
+        self.dropconnect = dropconnect
+
 ############################################################
 #  Resnet Graph
 ############################################################
@@ -277,7 +283,7 @@ def _conv_block(inputs, filters, alpha, kernel=(3, 3), strides=(1, 1),block_id=1
     return KL.Activation(relu6, name='conv{}_relu'.format(block_id))(x)
 
 
-def _bottleneck(inputs, filters, kernel, t, s, r=False, alpha=1.0, block_id=1, train_bn = False):
+def _bottleneck(inputs, filters, kernel, t, s, block_args, r=False, alpha=1.0, block_id=1, train_bn = False):
     """Bottleneck
     This function defines a basic bottleneck structure.
     # Arguments
@@ -291,16 +297,23 @@ def _bottleneck(inputs, filters, kernel, t, s, r=False, alpha=1.0, block_id=1, t
             of the convolution along the width and height.Can be a single
             integer to specify the same value for all spatial dimensions.
         r: Boolean, Whether to use the residuals.
+        block_args: block level arguments for each _inverted_residual_block
     # Returns
         Output tensor.
     """
 
+
     channel_axis = 1 if K.image_data_format() == 'channels_first' else -1
-    tchannel = K.int_shape(inputs)[channel_axis] * t
+
+    in_filters = K.int_shape(inputs)[channel_axis]
+
+    tchannel = in_filters * t
     filters = int(alpha * filters)
 
+    # Expansion Phase
     x = _conv_block(inputs, tchannel, alpha, (1, 1), (1, 1),block_id=block_id,train_bn=train_bn)
 
+    # Depthwise convolution Phase
     x = KL.DepthwiseConv2D(kernel,
                     strides=(s, s),
                     depth_multiplier=1,
@@ -308,6 +321,27 @@ def _bottleneck(inputs, filters, kernel, t, s, r=False, alpha=1.0, block_id=1, t
                     name='conv_dw_{}'.format(block_id))(x)
     x = BatchNorm(axis=channel_axis,name='conv_dw_{}_bn'.format(block_id))(x, training=train_bn)
     x = KL.Activation(relu6, name='conv_dw_{}_relu'.format(block_id))(x)
+
+
+    # Check if squeeze and excitation is required:
+    has_se = (block_args.se_ratio is not None) and (block_args.se_ratio > 0) and (block_args.se_ratio <= 1) 
+
+    if has_se: 
+        num_reduced_filters = max(1, int(in_filters * block_args[se_ratio]))
+        
+        # Squeeze and Excitation layer.
+
+        # TODO: Add conv kernel initializer
+        x = KL.Conv2D(num_reduced_filters,
+                    (1, 1),
+                    strides=(1, 1),
+                    padding='same',
+                    name='conv_sqew_{}'.format(block_id))(x)
+        x = KL.Conv2D(filters,
+                    (1, 1),
+                    strides=(1, 1),
+                    padding='same',
+                    name='conv_exiw_{}'.format(block_id))(x)
 
     x = KL.Conv2D(filters,
                     (1, 1),
@@ -317,11 +351,17 @@ def _bottleneck(inputs, filters, kernel, t, s, r=False, alpha=1.0, block_id=1, t
     x = BatchNorm(axis=channel_axis, name='conv_pw_{}_bn'.format(block_id))(x, training=train_bn)
 
     if r:
-        x = KL.add([x, inputs], name='res{}'.format(block_id))
+        if (strides[0] == 1) and in_filters == filters:
+        # only apply drop_connect if skip presents.
+            if block_args.dropconnect:
+                x = utils.drop_connect(x, training, drop_connect_rate)
+
+            # Need to be sure where to add this
+            x = KL.add([x, inputs], name='res{}'.format(block_id))
     return x
 
 
-def _inverted_residual_block(inputs, filters, kernel, t, strides, n, alpha, block_id, train_bn):
+def _inverted_residual_block(inputs, filters, kernel, t, strides, block_args, n, alpha, block_id, train_bn):
     """Inverted Residual Block
     This function defines a sequence of 1 or more identical layers.
     # Arguments
@@ -331,19 +371,20 @@ def _inverted_residual_block(inputs, filters, kernel, t, strides, n, alpha, bloc
             width and height of the 2D convolution window.
         t: Integer, expansion factor.
             t is always applied to the input size.
-        s: An integer or tuple/list of 2 integers,specifying the strides
+        strides: An integer or tuple/list of 2 integers,specifying the strides
             of the convolution along the width and height.Can be a single
             integer to specify the same value for all spatial dimensions.
+        block_args: block level arguments for each _inverted_residual_block
         n: Integer, layer repeat times.
     # Returns
         Output tensor.
     """
 
-    x = _bottleneck(inputs, filters, kernel, t, strides, False, alpha, block_id, train_bn)
+    x = _bottleneck(inputs, filters, kernel, t, strides, block_args, False, alpha, block_id, train_bn)
 
     for i in range(1, n):
         block_id += 1
-        x = _bottleneck(x, filters, kernel, t, 1, True, alpha, block_id, train_bn)
+        x = _bottleneck(x, filters, kernel, t, 1, True, block_args, alpha, block_id, train_bn)
 
     return x
 
@@ -359,15 +400,26 @@ def efficientnet_graph(inputs, architecture, alpha = 1.0, train_bn = False):
         five Efficientnet model stages.
     """
     assert architecture in ["efficientnet"]
+    
+    arg_list = [
+      '0.25_0.2', '0.25_0.2', '0.25_0.2', '0.25_0.2',
+      '0.25_0.2', '0.25_0.2', '0.25_0.2']
+
+    block_arg_list = []
+    for arg_item in arg_list:
+        se_ratio, dropconnect = arg_item.split("_")
+        se_ratio = float(se_ratio)
+        dropconnect = float(dropconnect)        
+        block_arg_list.append(BlockArgs(se_ratio=se_ratio, dropconnect=dropconnect))
 
     x      = _conv_block(inputs, 32, alpha, (3, 3), strides=(2, 2), block_id=0, train_bn=train_bn)                      # Input Res: 1
-    C1 = x = _inverted_residual_block(x, 16,  (3, 3), t=1, strides=1, n=1, alpha=1.0, block_id=1, train_bn=train_bn)	# Input Res: 1/2
-    C2 = x = _inverted_residual_block(x, 24,  (3, 3), t=6, strides=2, n=2, alpha=1.0, block_id=2, train_bn=train_bn)	# Input Res: 1/2
-    C3 = x = _inverted_residual_block(x, 40,  (5, 5), t=6, strides=2, n=2, alpha=1.0, block_id=4, train_bn=train_bn)	# Input Res: 1/4
-    x      = _inverted_residual_block(x, 80,  (3, 3), t=6, strides=2, n=3, alpha=1.0, block_id=6, train_bn=train_bn)	# Input Res: 1/8
-    C4 = x = _inverted_residual_block(x, 112,  (3, 3), t=6, strides=1, n=3, alpha=1.0, block_id=9, train_bn=train_bn)	# Input Res: 1/8
-    x      = _inverted_residual_block(x, 192, (3, 3), t=6, strides=2, n=4, alpha=1.0, block_id=12, train_bn=train_bn)	# Input Res: 1/16
-    C5 = x = _inverted_residual_block(x, 320, (3, 3), t=6, strides=1, n=1, alpha=1.0, block_id=16, train_bn=train_bn)	# Input Res: 1/32
+    C1 = x = _inverted_residual_block(x, 16,  (3, 3), t=1, strides=1, block_args=block_arg_list[0], n=1, alpha=1.0, block_id=1, train_bn=train_bn)	# Input Res: 1/2
+    C2 = x = _inverted_residual_block(x, 24,  (3, 3), t=6, strides=2, block_args=block_arg_list[1], n=2, alpha=1.0, block_id=2, train_bn=train_bn)	# Input Res: 1/2
+    C3 = x = _inverted_residual_block(x, 40,  (5, 5), t=6, strides=2, block_args=block_arg_list[2], n=2, alpha=1.0, block_id=4, train_bn=train_bn)	# Input Res: 1/4
+    x      = _inverted_residual_block(x, 80,  (3, 3), t=6, strides=2, block_args=block_arg_list[3], n=3, alpha=1.0, block_id=6, train_bn=train_bn)	# Input Res: 1/8
+    C4 = x = _inverted_residual_block(x, 112,  (3, 3), t=6, strides=1, block_args=block_arg_list[4], n=3, alpha=1.0, block_id=9, train_bn=train_bn)	# Input Res: 1/8
+    x      = _inverted_residual_block(x, 192, (3, 3), t=6, strides=2, block_args=block_arg_list[5], n=4, alpha=1.0, block_id=12, train_bn=train_bn)	# Input Res: 1/16
+    C5 = x = _inverted_residual_block(x, 320, (3, 3), t=6, strides=1, block_args=block_args_list[6], n=1, alpha=1.0, block_id=16, train_bn=train_bn)	# Input Res: 1/32
 
     return [C1, C2, C3, C4, C5]
 
