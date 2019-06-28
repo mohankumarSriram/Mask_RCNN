@@ -23,7 +23,7 @@ Usage: import the module (see Jupyter notebooks for examples), or run from
     # Continue training the last model you trained
     python3 coco.py train --dataset=/path/to/coco/ --model=last
 
-    # Run COCO evaluatoin on the last model you trained
+    # Run COCO evaluation on the last model you trained
     python3 coco.py evaluate --dataset=/path/to/coco/ --model=last
 """
 
@@ -55,13 +55,16 @@ sys.path.append(ROOT_DIR)  # To find local version of the library
 from mrcnn.config import Config
 from mrcnn import model as modellib, utils
 
-# Path to trained weights file
-COCO_MODEL_PATH = os.path.join(ROOT_DIR, "mask_rcnn_coco.h5")
 
 # Directory to save logs and model checkpoints, if not provided
 # through the command line argument --logs
+DEFAULT_WEIGHTS_DIR = os.path.join(ROOT_DIR, "weights")
 DEFAULT_LOGS_DIR = os.path.join(ROOT_DIR, "logs")
-DEFAULT_DATASET_YEAR = "2014"
+DEFAULT_DATASET_DIR = os.path.join(ROOT_DIR, "data/coco")
+DEFAULT_DATASET_YEAR = "2017"#"2014"
+
+# Path to trained weights file
+COCO_MODEL_PATH = os.path.join(DEFAULT_WEIGHTS_DIR, "mask_rcnn_coco.h5")
 
 ############################################################
 #  Configurations
@@ -79,6 +82,7 @@ class CocoConfig(Config):
     # We use a GPU with 12GB memory, which can fit two images.
     # Adjust down if you use a smaller GPU.
     IMAGES_PER_GPU = 2
+    GPU_COUNT = 1
 
     # Uncomment to train on 8 GPUs (default is 1)
     # GPU_COUNT = 8
@@ -86,6 +90,29 @@ class CocoConfig(Config):
     # Number of classes (including background)
     NUM_CLASSES = 1 + 80  # COCO has 80 classes
 
+    BACKBONE = "efficientnet"
+
+    ## Resolution
+    RES_FACTOR = 2
+    IMAGE_MAX_DIM = 1024 // RES_FACTOR
+    RPN_ANCHOR_SCALES = tuple(np.divide((32, 64, 128, 256, 512),RES_FACTOR))
+
+    ## Losses
+    LOSS_WEIGHTS = {
+        "rpn_class_loss": 1.,
+        "rpn_bbox_loss": 1.,
+        "mrcnn_class_loss": 1.,
+        "mrcnn_bbox_loss": 1.,
+        "mrcnn_mask_loss": 1.
+    }
+
+    ## Steps
+    STEPS_PER_EPOCH = 10000
+    VALIDATION_STEPS = 50
+
+    ## Additions
+    TRAIN_BN = True
+    POST_NMS_ROIS_INFERENCE = 100
 
 ############################################################
 #  Dataset
@@ -128,6 +155,8 @@ class CocoDataset(utils.Dataset):
         else:
             # All images
             image_ids = list(coco.imgs.keys())
+
+        self.dataset_size = len(image_ids)
 
         # Add classes
         for i in class_ids:
@@ -405,7 +434,8 @@ if __name__ == '__main__':
     parser.add_argument("command",
                         metavar="<command>",
                         help="'train' or 'evaluate' on MS COCO")
-    parser.add_argument('--dataset', required=True,
+    parser.add_argument('--dataset', required=False,
+                        default = DEFAULT_DATASET_DIR,
                         metavar="/path/to/coco/",
                         help='Directory of the MS-COCO dataset')
     parser.add_argument('--year', required=False,
@@ -428,6 +458,12 @@ if __name__ == '__main__':
                         metavar="<True|False>",
                         help='Automatically download and unzip MS-COCO files (default=False)',
                         type=bool)
+
+    parser.add_argument('--classes', required=False,
+			            default=None,
+			            metavar="<class names>",
+			            help='classes that should be trained on. Default are all')
+    
     args = parser.parse_args()
     print("Command: ", args.command)
     print("Model: ", args.model)
@@ -435,6 +471,10 @@ if __name__ == '__main__':
     print("Year: ", args.year)
     print("Logs: ", args.logs)
     print("Auto Download: ", args.download)
+    print("Classes (None means all):", args.classes)
+			
+	# classes must be a list
+	args.classes = list(args.classes)
 
     # Configurations
     if args.command == "train":
