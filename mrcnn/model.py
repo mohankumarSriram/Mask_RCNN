@@ -278,6 +278,7 @@ def _conv_block(inputs, filters, alpha, kernel=(3, 3), strides=(1, 1),block_id=1
                padding='same',
                use_bias=False,
                strides=strides,
+               kernel_initializer=utils.conv_kernel_initializer,
                name='conv{}'.format(block_id))(inputs)
     x = BatchNorm(axis=channel_axis, name='conv{}_bn'.format(block_id))(x, training = train_bn)
     return KL.Activation(relu6, name='conv{}_relu'.format(block_id))(x)
@@ -318,6 +319,7 @@ def _bottleneck(inputs, filters, kernel, t, s, block_args, r=False, alpha=1.0, b
                     strides=(s, s),
                     depth_multiplier=1,
                     padding='same',
+                    kernel_initializer=utils.conv_kernel_initializer,
                     name='conv_dw_{}'.format(block_id))(x)
     x = BatchNorm(axis=channel_axis,name='conv_dw_{}_bn'.format(block_id))(x, training=train_bn)
     x = KL.Activation(relu6, name='conv_dw_{}_relu'.format(block_id))(x)
@@ -331,22 +333,24 @@ def _bottleneck(inputs, filters, kernel, t, s, block_args, r=False, alpha=1.0, b
         
         # Squeeze and Excitation layer.
 
-        # TODO: Add conv kernel initializer
         x = KL.Conv2D(num_reduced_filters,
                     (1, 1),
                     strides=(1, 1),
                     padding='same',
+                    kernel_initializer=utils.conv_kernel_initializer,
                     name='conv_sqew_{}'.format(block_id))(x)
         x = KL.Conv2D(filters,
                     (1, 1),
                     strides=(1, 1),
                     padding='same',
+                    kernel_initializer=utils.conv_kernel_initializer,
                     name='conv_exiw_{}'.format(block_id))(x)
 
     x = KL.Conv2D(filters,
                     (1, 1),
                     strides=(1, 1),
                     padding='same',
+                    kernel_initializer=utils.conv_kernel_initializer,
                     name='conv_pw_{}'.format(block_id))(x)
     x = BatchNorm(axis=channel_axis, name='conv_pw_{}_bn'.format(block_id))(x, training=train_bn)
 
