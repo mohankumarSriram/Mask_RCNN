@@ -28,6 +28,10 @@ from distutils.version import LooseVersion
 COCO_MODEL_URL = "https://github.com/matterport/Mask_RCNN/releases/download/v2.0/mask_rcnn_coco.h5"
 
 
+# Scaling parameters for efficient net with [width_coeff, depth_coeff]
+EFF_NET_SCALING_PARAMS = {"BO": [1.0, 1.0], "B1": [1.0, 1.1], "B2": [1.1, 1.2], "B3": [1.2, 1.4],
+                         "B4": [1.4, 1.8], "B5": [1.6, 2.2], "B6": [1.8, 2.6], "B7": [2.0, 3.1]}
+
 ############################################################
 #  Efficient Net
 ############################################################

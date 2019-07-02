@@ -87,10 +87,41 @@ def compute_backbone_shapes(config, image_shape):
 
 
 class BlockArgs(object):
-    def __init__(self, se_ratio=0, dropconnect=None, strides=[1, 1]):
+    def __init__(self, se_ratio=0, dropconnect=None, width_coeff=1.0, depth_coeff=1.0, strides=[1, 1], depth_divisor=8, min_depth=None):
         self.se_ratio = se_ratio
         self.strides = strides
         self.dropconnect = dropconnect
+        self.width_coeff = width_coeff
+        self.depth_coeff = depth_coeff
+        self.depth_divisor = depth_divisor
+        self.min_depth = min_depth
+
+def round_filters(filters, global_params):
+  """Round number of filters based on depth multiplier."""
+  orig_f = filters
+  multiplier = global_params.width_coefficient
+  divisor = global_params.depth_divisor
+  min_depth = global_params.min_depth
+  if not multiplier:
+    return filters
+
+  filters *= multiplier
+  min_depth = min_depth or divisor
+  new_filters = max(min_depth, int(filters + divisor / 2) // divisor * divisor)
+  # Make sure that round down does not go down by more than 10%.
+  if new_filters < 0.9 * filters:
+    new_filters += divisor
+  tf.logging.info('round_filter input={} output={}'.format(orig_f, new_filters))
+  return int(new_filters)
+
+
+def round_repeats(repeats, depth_coefficient):
+  """Round number of filters based on depth multiplier."""
+  multiplier = depth_coefficient
+  if not multiplier:
+    return repeats
+  return int(math.ceil(multiplier * repeats))
+
 
 ############################################################
 #  Resnet Graph
@@ -386,6 +417,7 @@ def _inverted_residual_block(inputs, filters, kernel, t, strides, block_args, n,
     """
 
     x = _bottleneck(inputs, filters, kernel, t, strides, block_args, False, alpha, block_id, train_bn)
+    n = round_repeats(n, block_args.depth_coeff)
 
     for i in range(1, n):
         block_id += 1
@@ -393,7 +425,7 @@ def _inverted_residual_block(inputs, filters, kernel, t, strides, block_args, n,
 
     return x
 
-def efficientnet_graph(inputs, architecture, alpha = 1.0, train_bn = False):
+def efficientnet_graph(inputs, architecture, alpha = 1.0, train_bn = False, net_type = "B0"):
     """Efficientnet
     This function defines a Efficientnet baseline architecture.
     # Arguments
@@ -409,22 +441,24 @@ def efficientnet_graph(inputs, architecture, alpha = 1.0, train_bn = False):
     arg_list = [
       '0.25_0.2', '0.25_0.2', '0.25_0.2', '0.25_0.2',
       '0.25_0.2', '0.25_0.2', '0.25_0.2']
+    
+    width_coeff, depth_coeff = utils.EFF_NET_SCALING_PARAMS[net_type]
 
     block_arg_list = []
     for arg_item in arg_list:
         se_ratio, dropconnect = arg_item.split("_")
         se_ratio = float(se_ratio)
         dropconnect = float(dropconnect)        
-        block_arg_list.append(BlockArgs(se_ratio=se_ratio, dropconnect=dropconnect))
+        block_arg_list.append(BlockArgs(se_ratio=se_ratio, dropconnect=dropconnect, width_coeff=width_coeff, depth_coeff=depth_coeff))
 
-    x      = _conv_block(inputs, 32, alpha, (3, 3), strides=(2, 2), block_id=0, train_bn=train_bn)                      # Input Res: 1
-    C1 = x = _inverted_residual_block(x, 16,  (3, 3), t=1, strides=1, block_args=block_arg_list[0], n=1, alpha=1.0, block_id=1, train_bn=train_bn)	# Input Res: 1/2
-    C2 = x = _inverted_residual_block(x, 24,  (3, 3), t=6, strides=2, block_args=block_arg_list[1], n=2, alpha=1.0, block_id=2, train_bn=train_bn)	# Input Res: 1/2
-    C3 = x = _inverted_residual_block(x, 40,  (5, 5), t=6, strides=2, block_args=block_arg_list[2], n=2, alpha=1.0, block_id=4, train_bn=train_bn)	# Input Res: 1/4
-    x      = _inverted_residual_block(x, 80,  (3, 3), t=6, strides=2, block_args=block_arg_list[3], n=3, alpha=1.0, block_id=6, train_bn=train_bn)	# Input Res: 1/8
-    C4 = x = _inverted_residual_block(x, 112,  (3, 3), t=6, strides=1, block_args=block_arg_list[4], n=3, alpha=1.0, block_id=9, train_bn=train_bn)	# Input Res: 1/8
-    x      = _inverted_residual_block(x, 192, (3, 3), t=6, strides=2, block_args=block_arg_list[5], n=4, alpha=1.0, block_id=12, train_bn=train_bn)	# Input Res: 1/16
-    C5 = x = _inverted_residual_block(x, 320, (3, 3), t=6, strides=1, block_args=block_arg_list[6], n=1, alpha=1.0, block_id=16, train_bn=train_bn)	# Input Res: 1/32
+    x      = _conv_block(inputs, round_filters(32, block_arg_list[0]) , alpha, (3, 3), strides=(2, 2), block_id=0, train_bn=train_bn)                      # Input Res: 1
+    C1 = x = _inverted_residual_block(x, round_filters(16, block_arg_list[0]),  (3, 3), t=1, strides=1, block_args=block_arg_list[0], n=1, alpha=1.0, block_id=1, train_bn=train_bn)	# Input Res: 1/2
+    C2 = x = _inverted_residual_block(x, round_filters(24, block_arg_list[1]),  (3, 3), t=6, strides=2, block_args=block_arg_list[1], n=2, alpha=1.0, block_id=2, train_bn=train_bn)	# Input Res: 1/2
+    C3 = x = _inverted_residual_block(x, round_filters(40, block_arg_list[2]),  (5, 5), t=6, strides=2, block_args=block_arg_list[2], n=2, alpha=1.0, block_id=4, train_bn=train_bn)	# Input Res: 1/4
+    x      = _inverted_residual_block(x, round_filters(80, block_arg_list[3]),  (3, 3), t=6, strides=2, block_args=block_arg_list[3], n=3, alpha=1.0, block_id=6, train_bn=train_bn)	# Input Res: 1/8
+    C4 = x = _inverted_residual_block(x, round_filters(112, block_arg_list[4]),  (3, 3), t=6, strides=1, block_args=block_arg_list[4], n=3, alpha=1.0, block_id=9, train_bn=train_bn)	# Input Res: 1/8
+    x      = _inverted_residual_block(x, round_filters(192, block_arg_list[5]), (3, 3), t=6, strides=2, block_args=block_arg_list[5], n=4, alpha=1.0, block_id=12, train_bn=train_bn)	# Input Res: 1/16
+    C5 = x = _inverted_residual_block(x, round_filters(320, block_arg_list[6]), (3, 3), t=6, strides=1, block_args=block_arg_list[6], n=1, alpha=1.0, block_id=16, train_bn=train_bn)	# Input Res: 1/32
 
     return [C1, C2, C3, C4, C5]
 
